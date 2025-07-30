@@ -3,11 +3,16 @@ from fastapi import APIRouter
 from sqlmodel import Session, select
 from models.receipt_table import *
 from fastapi import  UploadFile, File
-
 from fastapi import APIRouter, Depends, HTTPException,Security
 from db.session import get_session
 from fastapi.security import HTTPBearer
 import os
+import fitz  # PyMuPDF
+from PIL import Image
+import io
+import base64
+from services.llm.utils import extract_text_pdf, extract_receipt_data
+from models.schema_tables import ReceiptExtractedData
 
 router = APIRouter(prefix="/receipt", tags=["receipt"])
 
@@ -126,6 +131,130 @@ async def validate_receipt_file(
 
 
 
+# Process endpoint
+@router.post("/process/{file_id}")
+async def process_receipt(
+    file_id: uuid.UUID,
+    session: Session = Depends(get_session),
+   
+):
+    """
+    Process a receipt file by extracting text and structured data, then store in Receipt table.
+
+    Args:
+        file_id: UUID of the ReceiptFile to process.
+        session: Database session.
+      
+
+    Returns:
+        dict: Extracted receipt data and new receipt ID.
+
+    Raises:
+        HTTPException: If file not found, already processed, or processing fails.
+    """
+    
+    
+    # Retrieve ReceiptFile
+    receipt_file = session.exec(
+        select(ReceiptFile).where(ReceiptFile.id == file_id)
+    ).first()
+    if not receipt_file:
+        raise HTTPException(status_code=404, detail="File not found")
+    if receipt_file.is_processed:
+        raise HTTPException(status_code=400, detail="File already processed")
+    if not receipt_file.file_name.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    try:
+        # Convert PDF to images and extract text
+        if not os.path.exists(receipt_file.file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        
+        doc = fitz.open(receipt_file.file_path)
+        if len(doc) > 10:  # Limit to 10 pages
+            doc.close()
+            raise HTTPException(status_code=400, detail="PDF has too many pages")
+        
+        print(doc)
+        text = ""
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))  # 300 DPI
+            img = Image.open(io.BytesIO(pix.tobytes()))
+            
+            # Convert image to base64
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG")
+            image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            
+            # Extract text using Together AI vision model
+            page_text = await extract_text_pdf(image_base64)
+            text += page_text + "\n\n"
+        
+        doc.close()
+        if not text.strip():
+            raise RuntimeError("No text extracted from PDF")
+        
+        print(text,"text")
+
+        # Extract structured data
+        extracted_data = await extract_receipt_data(text)
+        
+        # Parse purchased_at
+        purchased_at = None
+        if extracted_data.purchased_at:
+            try:
+                purchased_at = datetime.strptime(extracted_data.purchased_at, "%Y-%m-%d")
+            except ValueError:
+                receipt_file.invalid_reason = "Invalid date format in extracted data"
+                receipt_file.is_valid = False
+                receipt_file.updated_at = datetime.utcnow()
+                session.add(receipt_file)
+                session.commit()
+                raise HTTPException(status_code=400, detail="Invalid date format")
+
+        # Create Receipt record
+        receipt = Receipt(
+            merchant_name=extracted_data.merchant_name,
+            total_amount=extracted_data.total_amount,
+            purchased_at=purchased_at,
+            file_path=receipt_file.file_path,
+          
+        )
+        session.add(receipt)
+        
+        # Update ReceiptFile
+        receipt_file.is_processed = True
+        receipt_file.is_valid = True
+        receipt_file.invalid_reason = None
+        receipt_file.updated_at = datetime.utcnow()
+        session.add(receipt_file)
+        
+        session.commit()
+        session.refresh(receipt)
+        
+        return {
+            "receipt_id": str(receipt.id),
+            "merchant_name": receipt.merchant_name,
+            "total_amount": receipt.total_amount,
+            "purchased_at": receipt.purchased_at.isoformat() if receipt.purchased_at else None
+        }
+    except RuntimeError as e:
+        print(str(e))
+        receipt_file.is_valid = False
+        receipt_file.invalid_reason = str(e)
+        receipt_file.updated_at = datetime.utcnow()
+        session.add(receipt_file)
+        session.commit()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(str(e))
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+
+
 @router.get("/all_receipts")
 async def get_receipts(
     session: Session = Depends(get_session),
@@ -178,3 +307,4 @@ async def get_receipt(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     return receipt
+

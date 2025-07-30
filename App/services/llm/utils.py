@@ -8,24 +8,45 @@ client = Together(api_key=settings.TOGETHER_AI_API_KEY)
 
 
 
-async def extract_text_pdf(image_base64):
-    # Call Together AI vision model
-    response = client.chat.completions.create(
-        model="meta-llama/Llama-3.2-11B-Vision-Instruct",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Extract all text from this image, preserving the document structure as much as possible."},
-                    {"type": "image_base64", "image_base64": {"data": image_base64}}
-                ]
-            }
-        ],
-        max_tokens=1000,
-        temperature=0.5
-    )
+async def extract_text_pdf(image_base64: str) -> str:
+    """
+    Extract text from a base64-encoded image using Together AI's vision model.
+
+    Args:
+        image_base64: Base64-encoded string of the image.
+
+    Returns:
+        str: Extracted text from the image.
+
+    Raises:
+        RuntimeError: If the API call fails or returns invalid data.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Extract all text from this image, preserving the document structure as much as possible."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image_base64}"}
+                        }
+                    ]
+                }
+            ],
+            max_tokens=1000,
+            temperature=0.5
+        )
+        page_text = response.choices[0].message.content.strip()
+        return page_text
+    except Exception as e:
+        raise RuntimeError(f"Failed to extract text from image: {str(e)}")
     
-    page_text = response.choices[0].message.content.strip()
 
 
 
@@ -50,7 +71,7 @@ Return the output in JSON format:
 """
     try:
         response = client.chat.completions.create(
-            model="meta-llama/LLaMA-3.2-11B-Vision-Instruct",  # Using same model for consistency
+            model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",  # Using same model for consistency
             messages=[
                 {"role": "user", "content": prompt}
             ],
