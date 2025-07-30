@@ -78,49 +78,50 @@ async def upload_receipt(
 
 
 
-# from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader
 
-# @router.post("/validate/{file_id}")
-# async def validate_receipt_file(
-#     file_id: uuid.UUID,
-#     session: Session = Depends(get_session),
+@router.post("/validate/{file_id}")
+async def validate_receipt_file(
+    file_id: uuid.UUID,
+    session: Session = Depends(get_session),
     
-# ):
-#     """
-#     Validate if the uploaded receipt file is a valid PDF.
+):
+    """
+    Validate if the uploaded receipt file is a valid PDF.
 
-#     Args:
-#         file_id (uuid.UUID): The ID of the receipt file to validate.
-#         session (Session): Database session.
-#        
+    Args:
+        file_id (uuid.UUID): The ID of the receipt file to validate.
+        session (Session): Database session.
+       
 
-#     Returns:
-#         dict: Validation result with is_valid and invalid_reason.
+    Returns:
+        dict: Validation result with is_valid and invalid_reason.
 
-#     Raises:
-#         HTTPException: If the file is not found or validation fails.
-#     """
+    Raises:
+        HTTPException: If the file is not found or validation fails.
+    """
   
-#     receipt_file = session.exec(
-#         select(ReceiptFile).where(ReceiptFile.id == file_id)
-#     ).first()
-#     if not receipt_file:
-#         raise HTTPException(status_code=404, detail="File not found")
+    receipt_file = session.exec(
+        select(ReceiptFile).where(ReceiptFile.id == file_id)
+    ).first()
+    if not receipt_file:
+        raise HTTPException(status_code=404, detail="File not found")
     
-#     try:
-#         with open(receipt_file.file_path, "rb") as f:
-#             PdfReader(f)
-#         receipt_file.is_valid = True
-#         receipt_file.invalid_reason = None
-#     except Exception as e:
-#         receipt_file.is_valid = False
-#         receipt_file.invalid_reason = str(e)
+    try:
+        with open(receipt_file.file_path, "rb") as f:
+            PdfReader(f)
+        receipt_file.is_valid = True
+        receipt_file.invalid_reason = None
+    except Exception as e:
+        receipt_file.is_valid = False
+        receipt_file.invalid_reason = str(e)
     
-#     receipt_file.updated_at = datetime.now()
-#     session.add(receipt_file)
-#     session.commit()
+    receipt_file.updated_at = datetime.now()
+    session.add(receipt_file)
+    session.commit()
     
-#     return {"is_valid": receipt_file.is_valid, "invalid_reason": receipt_file.invalid_reason}
+    return {"is_valid": receipt_file.is_valid, "invalid_reason": receipt_file.invalid_reason}
+
 
 
 

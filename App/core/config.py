@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     
     SQL_CONNECTION: str
+    TOGETHER_AI_API_KEY:str
+
     
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

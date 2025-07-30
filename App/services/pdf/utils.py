@@ -1,15 +1,11 @@
 import io
 from fastapi import HTTPException
 from PyPDF2 import PdfReader
-import google.oauth2.credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
-from googleapiclient.errors import HttpError
 from core.logging import setup_logger
-import os
-import tempfile
-
-from docx import Document
+import os,fitz,tempfile,time,pytesseract
+from PIL import Image
+       
+        
 
 from services.llm.job_description.utils import extract_text_from_image_with_llm
 
@@ -17,7 +13,6 @@ logger = setup_logger(__name__)
 
 
 
-from io import BytesIO
 
 from fastapi import HTTPException, UploadFile
 from services.llm.utils import parse_job_description
@@ -99,7 +94,7 @@ async def extract_text_conventional(file: UploadFile) -> str:
 
             print("Extracting text using tessaract from pdf")
             # Use PyMuPDF (fitz) with table extraction
-            import fitz  # PyMuPDF
+            # PyMuPDF
             
             with fitz.open(stream=file_bytes, filetype="pdf") as doc:
                 text = ""
@@ -119,41 +114,15 @@ async def extract_text_conventional(file: UploadFile) -> str:
                 
                 return text
                 
-        elif file_extension == ".docx":
-            print("Extracting text using python-docx from docx file")
-            # Try extracting text with python-docx
-            doc = Document(BytesIO(file_bytes))
+        else:
+          
+            # For other formats, return empty string to fall back to OCR/image method
+            return ""
             
-            # Extract paragraph text
-            paragraphs_text = [para.text for para in doc.paragraphs]
-            
-            # Extract table text
-            tables_text = []
-            for table in doc.tables:
-                table_rows = []
-                for row in table.rows:
-                    row_cells = [cell.text for cell in row.cells]
-                    table_rows.append(" | ".join(row_cells))
-                tables_text.append("\n".join(table_rows))
-            
-            # Combine all text
-            all_text = "\n".join(paragraphs_text)
-            if tables_text:
-                all_text += "\n\n--- TABLES ---\n\n" + "\n\n".join(tables_text)
-                
-            return all_text
-                
-        elif file_extension in [".txt", ".md", ".csv", ".json"]:
-            print("Extracting text using text files")
-            # Plain text files
-            return file_bytes.decode("utf-8", errors="replace")
-            
-        # For other formats, return empty string to fall back to OCR/image method
-        return ""
-        
     except Exception as e:
         print(f"Conventional text extraction failed: {str(e)}")
         return ""  # Return empty string to fall back to OCR/image method
+
 
 
 # OCR-based text extraction using pytesseract
@@ -168,11 +137,6 @@ async def extract_text_via_ocr(file: UploadFile) -> str:
         str: Extracted text or empty string if extraction fails.
     """
     try:
-        import pytesseract
-        from PIL import Image
-        import fitz  # PyMuPDF
-        import tempfile
-        import time
         
         # Set the path to Tesseract executable
         pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -222,42 +186,12 @@ async def extract_text_via_ocr(file: UploadFile) -> str:
             
             return extracted_text
             
-        # For image files
-        elif file_extension in [".jpg", ".jpeg", ".png", ".tiff", ".bmp", ".gif"]:
-            # Create a unique filename for the temporary file
-            temp_filename = tempfile.mktemp(suffix=file_extension)
-            
-            try:
-                # Write image data to file
-                with open(temp_filename, 'wb') as f:
-                    f.write(file_bytes)
-                temp_files.append(temp_filename)
-                
-                # Use pytesseract to extract text from the image
-                img = Image.open(temp_filename)
-                extracted_text = pytesseract.image_to_string(img)
-                
-                # Close the image to release the file handle
-                img.close()
-                
-            except Exception as e:
-                 print(f"Error processing image file: {str(e)}")
-            
-            # Clean up the temporary file
-            try:
-                # Wait briefly to ensure file handles are released
-                time.sleep(0.1)
-                if os.path.exists(temp_filename):
-                    os.remove(temp_filename)
-            except Exception as e:
-                print(f"Failed to remove temporary file {temp_filename}: {str(e)}")
-            
-            return extracted_text
         
         # For other files, return empty to fall back to LLM method
         else:
             return ""
-            
+
+
     except Exception as e:
         print(f"OCR text extraction failed: {str(e)}")
         return ""  # Return empty string to fall back to LLM method
@@ -291,7 +225,7 @@ async def extract_text_via_images(file: UploadFile) -> str:
             
             if file_extension == ".pdf":
                 # Use PyMuPDF for PDF to image conversion
-                import fitz  # PyMuPDF
+                # PyMuPDF
                 
                 with fitz.open(stream=file_bytes, filetype="pdf") as doc:
                     for i, page in enumerate(doc):
@@ -300,11 +234,13 @@ async def extract_text_via_images(file: UploadFile) -> str:
                         image_path = os.path.join(temp_dir, f"page_{i}.png")
                         pix.save(image_path)
                         image_paths.append(image_path)
+
             else:
                 # For non-PDF files, we need to convert them to PDF first or use other methods
-                # This is a simplified example - in practice, you might use libraries like
-                # libreoffice, unoconv, pandoc, etc. to convert various formats to PDF
+                
                 raise RuntimeError(f"Image conversion for {file_extension} not implemented yet")
+            
+
             
             # Process images with LLM
             all_text = ""

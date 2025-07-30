@@ -84,6 +84,7 @@ class Receipt(SQLModel, table=True):
   
 
 
+
 class FileSource(str, enum.Enum):
     DRIVE = "DRIVE"
     EMAIL = "EMAIL"
