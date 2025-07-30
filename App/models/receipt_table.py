@@ -42,20 +42,7 @@ class ReceiptFile(SQLModel, table=True):
         SQLModelField(default_factory=datetime.now, description="Last update time")
     ]
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "id": "123e4567-e89b-12d3-a456-426614174000",
-                "file_name": "receipt_001.pdf",
-                "file_path": "uploads/receipt_001.pdf",
-                "is_valid": True,
-                "invalid_reason": None,
-                "is_processed": False,
-                "created_at": "2023-01-01T00:00:00Z",
-                "updated_at": "2023-01-01T00:00:00Z",
-            }
-        }
-    )
+    
 
 
 class Receipt(SQLModel, table=True):
@@ -72,6 +59,12 @@ class Receipt(SQLModel, table=True):
         Optional[str], 
         SQLModelField(max_length=255, default=None, description="Merchant name")
     ]
+
+    is_active: Annotated[
+        bool, 
+        SQLModelField(default=True, description="Indicates if the file is active or not")
+    ]
+
     total_amount: Annotated[
         Optional[float], 
         SQLModelField(default=None, description="Total amount spent")
@@ -88,8 +81,7 @@ class Receipt(SQLModel, table=True):
         datetime, 
         SQLModelField(default_factory=datetime.now, description="Last update time")
     ]
-    user_id: uuid.UUID = SQLModelField(foreign_key="user.id", description="User who owns the receipt")
-
+  
 
 
 class FileSource(str, enum.Enum):
@@ -97,4 +89,3 @@ class FileSource(str, enum.Enum):
     EMAIL = "EMAIL"
     LOCAL = "LOCAL"
     OTHER = "OTHER"
-
