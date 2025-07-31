@@ -84,7 +84,7 @@ Root folder has a [Postman collection](#testing-with-postman) (`receipt_postman_
 
 6. **Run the Application**:
    ```bash
-   Naviagate to  App folder and run `py runserver.py`
+   Navigate to  App folder and run `py runserver.py`
    ```
    - Access API at [http://127.0.0.1:8000](http://127.0.0.1:8000).
    - View interactive docs at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
