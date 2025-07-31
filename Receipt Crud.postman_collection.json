@@ -1,0 +1,137 @@
+{
+	"info": {
+		"_postman_id": "8619648d-aa86-40fc-8a2b-f401389132d0",
+		"name": "Receipt Crud",
+		"description": "This collection contains APIs for uploading, validating, and processing receipt PDF files.  \nIt supports conventional and OCR-based extraction,AI based and stores structured data in db.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "24141129"
+	},
+	"item": [
+		{
+			"name": "Upload Receipt",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": "/C:/Users/HP/OneDrive/Desktop/FastApi/automate-accounts-developer-hiring-assessment/2024/luckylouie_20240529_001.pdf"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/receipt/upload",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"receipt",
+						"upload"
+					]
+				},
+				"description": "Upload a receipt PDF file. The file will be saved to disk and metadata stored in the database. If a file with the same name already exists, it will be updated instead of duplicated. Only PDF files under 10MB are allowed."
+			},
+			"response": []
+		},
+		{
+			"name": "Process Receipt",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"is_premium_user\": true\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/receipt/process/9d83f2a7-0860-4562-b893-3a1fd0db7bfc",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"receipt",
+						"process",
+						"9d83f2a7-0860-4562-b893-3a1fd0db7bfc"
+					]
+				},
+				"description": "Processes the uploaded and validated receipt file by extracting text and structured data. For premium users, AI-based extraction is used; otherwise, it falls back to OCR or conventional text extraction. The extracted information is saved to the `Receipt` table."
+			},
+			"response": []
+		},
+		{
+			"name": "Get All Receipts (paginated)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/receipt/all_receipts?page=2&limit=1",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"receipt",
+						"all_receipts"
+					],
+					"query": [
+						{
+							"key": "page",
+							"value": "2"
+						},
+						{
+							"key": "limit",
+							"value": "1"
+						}
+					]
+				},
+				"description": "Retrieves a list of all active (non-deleted) receipts stored in the database. Each receipt contains structured metadata such as merchant name, amount, purchase date, and itemized entries."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Particular Receipt",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/receipt/6dd3dcfc-9910-4712-bc3a-d639675f0205",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"receipt",
+						"6dd3dcfc-9910-4712-bc3a-d639675f0205"
+					]
+				},
+				"description": "Retrieves a specific processed receipt by its ID. The receipt includes all extracted and structured fields such as merchant name, purchased amount, timestamp, and items"
+			},
+			"response": []
+		},
+		{
+			"name": "Validate PDF",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/receipt/validate/3ab72c25-fdac-4fd4-82ed-d397e53f49c8",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"receipt",
+						"validate",
+						"3ab72c25-fdac-4fd4-82ed-d397e53f49c8"
+					]
+				},
+				"description": "Validates the uploaded PDF file for structure and readability. This ensures the file is not corrupt or malformed. It updates the file's status in the database accordingly."
+			},
+			"response": []
+		}
+	]
+}
