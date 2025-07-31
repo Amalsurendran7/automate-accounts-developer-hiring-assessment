@@ -76,7 +76,7 @@ Root folder has a [Postman collection](#testing-with-postman) (`receipt_postman_
 
 
 5. **Initialize Database**:
-   - Run Alembic migrations for SQLite (`database.db`):
+   - Run Alembic migrations for SQLite (`test.db`):
      ```bash
      alembic upgrade head
      ```
@@ -198,13 +198,14 @@ Retrieve a receipt by ID.
 - Alternatively, use [Swagger UI](http://127.0.0.1:8000/docs) for interactive testing.
 
 ## Database Migrations
-The project uses **Alembic** for SQLite database migrations (`database.db`).
+The project uses **Alembic** for SQLite database migrations (`test.db`).
 
 1. Initialize schema:
    ```bash
+   cd App
    alembic upgrade head
    ```
-2. For schema changes (e.g., modifying `app/models/receipt_table.py`):
+2. For schema changes (e.g., modifying `app/models/receipt_table.py`) (if needed):
    ```bash
    alembic revision --autogenerate -m "Describe changes"
    alembic upgrade head
