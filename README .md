@@ -78,6 +78,7 @@ Root folder has a [Postman collection](#testing-with-postman) (`receipt_postman_
 5. **Initialize Database**:
    - Run Alembic migrations for SQLite (`test.db`):
      ```bash
+     cd App
      alembic upgrade head
      ```
 
