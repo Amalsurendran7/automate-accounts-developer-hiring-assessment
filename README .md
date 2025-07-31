@@ -47,7 +47,6 @@ Root folder has a [Postman collection](#testing-with-postman) (`receipt_postman_
      - `app/` - Application code
      - `requirements.txt` - Python dependencies
      - `receipt_postman_collection.json` - Postman collection
-     - `alembic.ini` - Alembic configuration
      - `README.md` - This file
 
 2. **Create Virtual Environment**:
