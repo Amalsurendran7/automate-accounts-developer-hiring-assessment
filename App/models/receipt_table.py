@@ -64,6 +64,7 @@ class Receipt(SQLModel, table=True):
         bool, 
         SQLModelField(default=True, description="Indicates if the file is active or not")
     ]
+    
 
     total_amount: Annotated[
         Optional[float], 
