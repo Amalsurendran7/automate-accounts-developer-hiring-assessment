@@ -1,5 +1,5 @@
 # Helper function to extract structured data using Together AI
-from models.schema_tables import ReceiptExtractedData
+from models.schema import ReceiptExtractedData
 from together import Together
 
 from core.config import settings
@@ -56,7 +56,10 @@ async def extract_receipt_data(text: str) -> ReceiptExtractedData:
 Extract the following information from the receipt text:
 - merchant_name (string): Name of the merchant or store
 - total_amount (float): Total amount spent
-- purchased_at (string): Date and time of purchase in YYYY-MM-DD HH:MM:SS format, if available
+- purchased_at (string): Date and time of purchase in 'YYYY-MM-DD HH:MM:SS' format. 
+  - Parse any date/time format in the text (e.g., MM/DD/YYYY, DD-MM-YYYY, Month DD YYYY, HH:MM AM/PM, etc.).
+  - If time is missing, assume 00:00:00.
+  - If date is ambiguous or missing, return null.
 - store_address (string): Store address, if available
 - phone_number (string): Store phone number, if available
 - store_number (string): Store number, if available
@@ -101,6 +104,7 @@ Return the output in JSON format with null for missing fields:
         if start == -1 or end == 0:
             raise RuntimeError("Invalid JSON response from LLM")
         json_str = generated_text[start:end]
+        print(json_str,"json")
         
         return ReceiptExtractedData.model_validate_json(json_str)
     except Exception as e:

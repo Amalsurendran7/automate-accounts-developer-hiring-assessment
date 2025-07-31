@@ -14,3 +14,7 @@ class ReceiptExtractedData(BaseModel):
     items: Optional[List[Dict]] = None
     payment_details: Optional[Dict] = None
     additional_info: Optional[Dict] = None
+
+
+class ProcessReceiptRequest(BaseModel):
+    is_premium_user: bool = False    

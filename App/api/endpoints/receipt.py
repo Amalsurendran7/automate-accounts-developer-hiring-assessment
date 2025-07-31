@@ -1,18 +1,20 @@
 from fastapi import APIRouter
-
+from dateutil.parser import parse as parse_date
 from sqlmodel import Session, select
 from models.receipt_table import *
 from fastapi import  UploadFile, File
 from fastapi import APIRouter, Depends, HTTPException,Security
 from db.session import get_session
 from fastapi.security import HTTPBearer
+
 import os
 import fitz  # PyMuPDF
 from PIL import Image
 import io
 import base64
 from services.llm.utils import extract_text_pdf, extract_receipt_data
-from models.schema_tables import ReceiptExtractedData
+from models.schema import ProcessReceiptRequest
+from services.pdf.utils import extract_text_conventional_with_file,extract_text_via_ocr_with_file
 
 router = APIRouter(prefix="/receipt", tags=["receipt"])
 
@@ -134,7 +136,9 @@ async def validate_receipt_file(
 @router.post("/process/{file_id}")
 async def process_receipt(
     file_id: uuid.UUID,
+    request: ProcessReceiptRequest,
     session: Session = Depends(get_session),
+   
 ):
     """
     Process a receipt file by extracting text and structured data, then store or update in Receipt table.
@@ -142,6 +146,9 @@ async def process_receipt(
     Args:
         file_id: UUID of the ReceiptFile to process.
         session: Database session.
+        is_premium_user: Boolean indicating if the user has a premium subscription.
+            Note: This is a request parameter for prototyping purposes only. In a production
+            environment, the user's subscription status should be retrieved from a users table.
 
     Returns:
         dict: Extracted receipt data and receipt ID.
@@ -150,67 +157,81 @@ async def process_receipt(
         HTTPException: If file not found, already processed, or processing fails.
     """
     # Retrieve ReceiptFile
+     
     receipt_file = session.exec(
         select(ReceiptFile).where(ReceiptFile.id == file_id)
     ).first()
     if not receipt_file:
         raise HTTPException(status_code=404, detail="File not found")
-    
 
     if not receipt_file.file_name.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
-    
 
     try:
-        # Convert PDF to images and extract text
+        # Check if file exists
         if not os.path.exists(receipt_file.file_path):
             raise HTTPException(status_code=404, detail="File not found on disk")
-        
+
+        # Open PDF document once and share it
         doc = fitz.open(receipt_file.file_path)
-        if len(doc) > 10:  # Limit to 10 pages
+        
+        try:
+            if len(doc) > 10:  # Limit to 10 pages
+                raise HTTPException(status_code=400, detail="PDF has too many pages")
+
+            text = ""
+            if request.is_premium_user:
+                # Premium version: Use AI-based text extraction
+                for page_num in range(len(doc)):
+                    page = doc.load_page(page_num)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))  # 300 DPI
+                    img = Image.open(io.BytesIO(pix.tobytes()))
+                    
+                    # Convert image to base64
+                    buffered = io.BytesIO()
+                    img.save(buffered, format="PNG")
+                    image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                    
+                    # Extract text using Together AI vision model
+                    page_text = await extract_text_pdf(image_base64)
+                    text += page_text + "\n\n"
+            else:
+                # Free version: Use conventional and OCR-based text extraction
+                # Pass the opened document to avoid reopening
+                text = await extract_text_conventional_with_file(doc)
+                if not text.strip():
+                    print("Couldn't extract text via conventional methods, trying OCR...")
+                    text = await extract_text_via_ocr_with_file(doc)
+                    print(text, "extracted_text: after OCR extraction")
+
+        finally:
+            # Always close the document
             doc.close()
-            raise HTTPException(status_code=400, detail="PDF has too many pages")
-        
-        text = ""
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))  # 300 DPI
-            img = Image.open(io.BytesIO(pix.tobytes()))
-            
-            # Convert image to base64
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-            
-            # Extract text using Together AI vision model
-            page_text = await extract_text_pdf(image_base64)
-            text += page_text + "\n\n"
-        
-        doc.close()
+
         if not text.strip():
             raise RuntimeError("No text extracted from PDF")
         
-        # Extract structured data
+        print(text, "text")
+
+        # Extract structured data using AI for both versions
         extracted_data = await extract_receipt_data(text)
-        
-        # Parse purchased_at
+
+        # Parse purchased_at with dateutil.parser
         purchased_at = None
         if extracted_data.purchased_at:
             try:
-                purchased_at = datetime.strptime(extracted_data.purchased_at, "%Y-%m-%d %H:%M:%S")
+                # Parse the date string with dateutil.parser for flexibility
+                parsed_date = parse_date(extracted_data.purchased_at, fuzzy=True)
+                # Ensure the format is standardized to YYYY-MM-DD HH:MM:SS
+                purchased_at = parsed_date.replace(microsecond=0)
             except ValueError as e:
-                print(str(e))
-
-
-            
+                print(f"Date parsing error: {str(e)}")
+                extracted_data.purchased_at = None  # Set to None if parsing fails
 
         # Check for existing receipt to avoid duplicates
-        receipt = None
         query = select(Receipt).where(Receipt.file_path == receipt_file.file_path)
-       
-        
         existing_receipt = session.exec(query).first()
-        
+
         if existing_receipt:
             # Update existing receipt
             existing_receipt.merchant_name = extracted_data.merchant_name
@@ -221,10 +242,10 @@ async def process_receipt(
             existing_receipt.store_number = extracted_data.store_number
             existing_receipt.cashier_number = extracted_data.cashier_number
             existing_receipt.barcode_num = extracted_data.barcode_num
-            existing_receipt.items = extracted_data.items
-            existing_receipt.payment_details = extracted_data.payment_details
-            existing_receipt.additional_info = extracted_data.additional_info
-            existing_receipt.updated_at = datetime.now()  # Update timestamp
+            existing_receipt.items = extracted_data.items or []
+            existing_receipt.payment_details = extracted_data.payment_details or {}
+            existing_receipt.additional_info = extracted_data.additional_info or {}
+            existing_receipt.updated_at = datetime.now()
             receipt = existing_receipt
             session.add(receipt)
         else:
@@ -239,24 +260,24 @@ async def process_receipt(
                 store_number=extracted_data.store_number,
                 cashier_number=extracted_data.cashier_number,
                 barcode_num=extracted_data.barcode_num,
-                items=extracted_data.items,
-                payment_details=extracted_data.payment_details,
-                additional_info=extracted_data.additional_info,
-                created_at=datetime.now(),  # Explicitly set for clarity
-                updated_at=datetime.now()   # Explicitly set for clarity
+                items=extracted_data.items or [],
+                payment_details=extracted_data.payment_details or {},
+                additional_info=extracted_data.additional_info or {},
+                created_at=datetime.now(),
+                updated_at=datetime.now()
             )
             session.add(receipt)
-        
+
         # Update ReceiptFile
         receipt_file.is_processed = True
         receipt_file.is_valid = True
         receipt_file.invalid_reason = None
         receipt_file.updated_at = datetime.now()
         session.add(receipt_file)
-        
+
         session.commit()
         session.refresh(receipt)
-        
+
         return {
             "receipt_id": str(receipt.id),
             "merchant_name": receipt.merchant_name,
@@ -283,6 +304,7 @@ async def process_receipt(
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 
 
