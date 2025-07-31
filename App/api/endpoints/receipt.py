@@ -15,21 +15,27 @@ import base64
 from services.llm.utils import extract_text_pdf, extract_receipt_data
 from models.schema import ProcessReceiptRequest
 from services.pdf.utils import extract_text_conventional_with_file,extract_text_via_ocr_with_file
+from core.logging import setup_logger
 
 router = APIRouter(prefix="/receipt", tags=["receipt"])
 
 
 security = HTTPBearer()
 
+# Set up the logger
+logger = setup_logger(__name__)
+
 # Directory for file uploads
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
 
 @router.post("/upload")
 async def upload_receipt(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    
 ):
     """
     Upload a PDF receipt file and store its metadata.
@@ -37,48 +43,76 @@ async def upload_receipt(
     Args:
         file (UploadFile): The receipt file to upload (PDF only).
         session (Session): Database session.
-       
 
     Returns:
         dict: Receipt file ID and name.
 
     Raises:
-        HTTPException: If the file is not a PDF or other errors occur.
+        HTTPException: If the file is not a PDF, is empty, too large, invalid, or other errors occur.
     """
-   
+    # Ensure upload directory exists
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    # Check if file is a PDF by extension
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+
+    # Read file content
+    content = await file.read()
+
+    # Check file size
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="File too large  (Max : 10mb)")
+
+    # Validate PDF
+    try:
+        doc = fitz.open(stream=content, filetype="pdf")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid PDF file")
+
+  
+    filename =file.filename
+
     
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
-    # Check for duplicates
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    # Check for duplicates in the database
     existing_file = session.exec(
-        select(ReceiptFile).where(ReceiptFile.file_name == file.filename)
+        select(ReceiptFile).where(ReceiptFile.file_name == filename)
     ).first()
-    
+
     if existing_file:
+        # Update existing file if desired (optional behavior)
         existing_file.file_path = file_path
         existing_file.updated_at = datetime.now()
         session.add(existing_file)
         session.commit()
         session.refresh(existing_file)
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
+        try:
+            with open(file_path, "wb") as f:
+                f.write(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="Error saving file")
         return {"id": str(existing_file.id), "file_name": existing_file.file_name}
-    
+
     # Save new file
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-    
+    try:
+        with open(file_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error saving file")
+
+    # Create new ReceiptFile entry
     receipt_file = ReceiptFile(
-        file_name=file.filename,
+        file_name=filename,
         file_path=file_path,
-       
     )
     session.add(receipt_file)
     session.commit()
     session.refresh(receipt_file)
-    
+
     return {"id": str(receipt_file.id), "file_name": receipt_file.file_name}
 
 
@@ -161,18 +195,44 @@ async def process_receipt(
     receipt_file = session.exec(
         select(ReceiptFile).where(ReceiptFile.id == file_id)
     ).first()
+
+
+    
+
     if not receipt_file:
         raise HTTPException(status_code=404, detail="File not found")
 
     if not receipt_file.file_name.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    # Check if file exists
+        
+    if not os.path.exists(receipt_file.file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    # Check file size
+    file_size_bytes = os.path.getsize(receipt_file.file_path)
+    file_size_mb = file_size_bytes / (1024 * 1024)  # Convert to MB
+    max_size_mb = 10  # Set a reasonable max size (e.g., 10 MB)
+    min_size_bytes = 1024  # Minimum size (e.g., 1 KB to ensure file isn't empty)
+
+
+
+    if file_size_bytes < min_size_bytes:
+        logger.error(f"File {receipt_file.file_path} is too small: {file_size_bytes} bytes")
+        raise HTTPException(status_code=400, detail="File is empty or too small")
+    if file_size_mb > max_size_mb:
+        logger.error(f"File {receipt_file.file_path} is too large: {file_size_mb:.2f} MB")
+        raise HTTPException(status_code=400, detail=f"File exceeds maximum size of {max_size_mb} MB")
+
+    logger.info(f"File size: {file_size_mb:.2f} MB")
+
+   
 
     try:
-        # Check if file exists
-        if not os.path.exists(receipt_file.file_path):
-            raise HTTPException(status_code=404, detail="File not found on disk")
-
+        
         # Open PDF document once and share it
+    
         doc = fitz.open(receipt_file.file_path)
         
         try:
@@ -180,6 +240,7 @@ async def process_receipt(
                 raise HTTPException(status_code=400, detail="PDF has too many pages")
 
             text = ""
+            print(request.is_premium_user,"request.is_premium_user")
             if request.is_premium_user:
                 # Premium version: Use AI-based text extraction
                 for page_num in range(len(doc)):
@@ -332,6 +393,8 @@ async def get_receipts(
     receipts = session.exec(
         select(Receipt).where(Receipt.is_active == True)
     ).all()
+
+    logger.info('check')
     return receipts
 
 

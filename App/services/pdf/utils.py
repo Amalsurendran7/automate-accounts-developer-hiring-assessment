@@ -56,10 +56,12 @@ async def extract_text_via_ocr_with_file(doc) -> str:
     Returns:
         str: Extracted text or empty string if extraction fails.
     """
+    print("function start")
     try:
-        # Set the path to Tesseract executable
-        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
         
+  
+        
+
         extracted_text = ""
         temp_files = []  # List to track temporary files
         
