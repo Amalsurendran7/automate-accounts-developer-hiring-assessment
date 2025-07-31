@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter,Query
 from dateutil.parser import parse as parse_date
-from sqlmodel import Session, select
+from sqlmodel import Session, select,func
+from math import ceil
 from models.receipt_table import *
 from fastapi import  UploadFile, File
 from fastapi import APIRouter, Depends, HTTPException,Security
@@ -370,32 +371,49 @@ async def process_receipt(
 
 
 
-
 @router.get("/all_receipts")
 async def get_receipts(
     session: Session = Depends(get_session),
-    
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Number of items per page"),
 ):
     """
-    List all receipts for the authenticated user.
+    List paginated receipts for the authenticated user.
 
     Args:
         session (Session): Database session.
-        credentials (HTTPAuthorizationCredentials): User credentials.
+        page (int): Page number.
+        limit (int): Items per page.
 
     Returns:
-        list: List of Receipt objects.
+        dict: Paginated list of Receipt objects with metadata.
 
     Raises:
         HTTPException: If errors occur during retrieval.
     """
-   
+
+    offset = (page - 1) * limit
+
+    total = session.exec(
+        select(func.count()).select_from(Receipt).where(Receipt.is_active == True)
+    ).one()
+
     receipts = session.exec(
-        select(Receipt).where(Receipt.is_active == True)
+        select(Receipt)
+        .where(Receipt.is_active == True)
+        .offset(offset)
+        .limit(limit)
     ).all()
 
-    logger.info('check')
-    return receipts
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": ceil(total / limit),
+        "results": receipts
+    }
+
+
 
 
 @router.get("/{receipt_id}")
