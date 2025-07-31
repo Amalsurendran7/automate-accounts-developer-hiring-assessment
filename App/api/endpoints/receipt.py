@@ -131,39 +131,35 @@ async def validate_receipt_file(
 
 
 
-# Process endpoint
 @router.post("/process/{file_id}")
 async def process_receipt(
     file_id: uuid.UUID,
     session: Session = Depends(get_session),
-   
 ):
     """
-    Process a receipt file by extracting text and structured data, then store in Receipt table.
+    Process a receipt file by extracting text and structured data, then store or update in Receipt table.
 
     Args:
         file_id: UUID of the ReceiptFile to process.
         session: Database session.
-      
 
     Returns:
-        dict: Extracted receipt data and new receipt ID.
+        dict: Extracted receipt data and receipt ID.
 
     Raises:
         HTTPException: If file not found, already processed, or processing fails.
     """
-    
-    
     # Retrieve ReceiptFile
     receipt_file = session.exec(
         select(ReceiptFile).where(ReceiptFile.id == file_id)
     ).first()
     if not receipt_file:
         raise HTTPException(status_code=404, detail="File not found")
-    if receipt_file.is_processed:
-        raise HTTPException(status_code=400, detail="File already processed")
+    
+
     if not receipt_file.file_name.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
+    
 
     try:
         # Convert PDF to images and extract text
@@ -175,7 +171,6 @@ async def process_receipt(
             doc.close()
             raise HTTPException(status_code=400, detail="PDF has too many pages")
         
-        print(doc)
         text = ""
         for page_num in range(len(doc)):
             page = doc.load_page(page_num)
@@ -195,8 +190,6 @@ async def process_receipt(
         if not text.strip():
             raise RuntimeError("No text extracted from PDF")
         
-        print(text,"text")
-
         # Extract structured data
         extracted_data = await extract_receipt_data(text)
         
@@ -204,30 +197,61 @@ async def process_receipt(
         purchased_at = None
         if extracted_data.purchased_at:
             try:
-                purchased_at = datetime.strptime(extracted_data.purchased_at, "%Y-%m-%d")
-            except ValueError:
-                receipt_file.invalid_reason = "Invalid date format in extracted data"
-                receipt_file.is_valid = False
-                receipt_file.updated_at = datetime.utcnow()
-                session.add(receipt_file)
-                session.commit()
-                raise HTTPException(status_code=400, detail="Invalid date format")
+                purchased_at = datetime.strptime(extracted_data.purchased_at, "%Y-%m-%d %H:%M:%S")
+            except ValueError as e:
+                print(str(e))
 
-        # Create Receipt record
-        receipt = Receipt(
-            merchant_name=extracted_data.merchant_name,
-            total_amount=extracted_data.total_amount,
-            purchased_at=purchased_at,
-            file_path=receipt_file.file_path,
-          
-        )
-        session.add(receipt)
+
+            
+
+        # Check for existing receipt to avoid duplicates
+        receipt = None
+        query = select(Receipt).where(Receipt.file_path == receipt_file.file_path)
+       
+        
+        existing_receipt = session.exec(query).first()
+        
+        if existing_receipt:
+            # Update existing receipt
+            existing_receipt.merchant_name = extracted_data.merchant_name
+            existing_receipt.total_amount = extracted_data.total_amount
+            existing_receipt.purchased_at = purchased_at
+            existing_receipt.store_address = extracted_data.store_address
+            existing_receipt.phone_number = extracted_data.phone_number
+            existing_receipt.store_number = extracted_data.store_number
+            existing_receipt.cashier_number = extracted_data.cashier_number
+            existing_receipt.barcode_num = extracted_data.barcode_num
+            existing_receipt.items = extracted_data.items
+            existing_receipt.payment_details = extracted_data.payment_details
+            existing_receipt.additional_info = extracted_data.additional_info
+            existing_receipt.updated_at = datetime.now()  # Update timestamp
+            receipt = existing_receipt
+            session.add(receipt)
+        else:
+            # Create new Receipt record
+            receipt = Receipt(
+                merchant_name=extracted_data.merchant_name,
+                total_amount=extracted_data.total_amount,
+                purchased_at=purchased_at,
+                file_path=receipt_file.file_path,
+                store_address=extracted_data.store_address,
+                phone_number=extracted_data.phone_number,
+                store_number=extracted_data.store_number,
+                cashier_number=extracted_data.cashier_number,
+                barcode_num=extracted_data.barcode_num,
+                items=extracted_data.items,
+                payment_details=extracted_data.payment_details,
+                additional_info=extracted_data.additional_info,
+                created_at=datetime.now(),  # Explicitly set for clarity
+                updated_at=datetime.now()   # Explicitly set for clarity
+            )
+            session.add(receipt)
         
         # Update ReceiptFile
         receipt_file.is_processed = True
         receipt_file.is_valid = True
         receipt_file.invalid_reason = None
-        receipt_file.updated_at = datetime.utcnow()
+        receipt_file.updated_at = datetime.now()
         session.add(receipt_file)
         
         session.commit()
@@ -237,20 +261,29 @@ async def process_receipt(
             "receipt_id": str(receipt.id),
             "merchant_name": receipt.merchant_name,
             "total_amount": receipt.total_amount,
-            "purchased_at": receipt.purchased_at.isoformat() if receipt.purchased_at else None
+            "purchased_at": receipt.purchased_at.isoformat() if receipt.purchased_at else None,
+            "store_address": receipt.store_address,
+            "phone_number": receipt.phone_number,
+            "store_number": receipt.store_number,
+            "cashier_number": receipt.cashier_number,
+            "barcode_num": receipt.barcode_num,
+            "items": receipt.items,
+            "payment_details": receipt.payment_details,
+            "additional_info": receipt.additional_info,
+            "created_at": receipt.created_at.isoformat(),
+            "updated_at": receipt.updated_at.isoformat()
         }
     except RuntimeError as e:
-        print(str(e))
         receipt_file.is_valid = False
         receipt_file.invalid_reason = str(e)
-        receipt_file.updated_at = datetime.utcnow()
+        receipt_file.updated_at = datetime.now()
         session.add(receipt_file)
         session.commit()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(str(e))
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 
 
